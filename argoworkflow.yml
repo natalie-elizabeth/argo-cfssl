@@ -1,0 +1,179 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata: { generateName: build-deploy- }
+spec:
+  entrypoint: build-deploy
+  arguments:
+    parameters:
+    - { name: should-print, value: "true" }
+    # - { name: url, value: "https://thrive.jfrog.io/artifactory/argo-artifacts/"}
+    
+  volumes:
+  - name: ssl-secret-volume
+    secret: 
+      secretName: nginxsecret
+  - name: csr-config
+    configMap:
+      name: csr-config
+
+  templates:
+    - name: build-deploy
+      inputs:
+        parameters:
+        - name: should-print
+      steps:
+        
+        # - - name: certificate-validity-check
+        #     template: certificate-validity-check
+            # test case
+        # - - name: print-hello
+        #     template: whalesay
+        #     when: "{{steps.validity-check.outputs.result}} == Expiring || {{inputs.parameters.should-print}} == false"
+        # - - name: svc-bit
+        #     template: svc-bit
+        #     when: "{{steps.certificate-validity-check.outputs.result}} == Invalid"
+        - - name: csr-provisioning
+            template: csr-provisioning
+        #     when: "{{steps.certificate-validity-check.outputs.result}} == Invalid"
+        # - - name: certificate-provisioning
+        #     template: certificate-provisioning
+        #     when: "{{steps.certificate-validity-check.outputs.result}} == Invalid"
+        #     arguments:
+        #       artifacts:
+        #       - name: csr
+        #         from: "{{steps.csr-provisioning.outputs.artifacts.csr}}" 
+        #       - name: private-key
+        #         from: "{{steps.csr-provisioning.outputs.artifacts.private-key}}"
+        #   - name: deployment-bit
+        #     template: deployment-bit
+    
+    # check namespace for secret name existance. Probably should be in the same template as the one running the next step which is certifcate validity
+    - name: certificate-validity-check
+      script:
+        image: nnanalarhy/kubessl
+        command: [sh]
+        source: |
+          CERT_RES=$(kubectl get secret/nginxsecret -n argo -o name)
+          VALIDITY_RES=$(openssl x509 -in /usr/local/share/ca-certificates/tls.crt -checkend 604800)
+          if [ "${CERT_RES}"  == "secret/nginxsecret" ] && [ "${VALIDITY_RES}" == "Certificate will not expire" ]; then
+            result="Valid"
+            echo $result
+          else
+            result="Invalid"
+            echo $result
+          fi
+        # commented out because if its mounted and no certificate exists, it will stick at poInitializing
+        # volumeMounts:
+        # - name: "ssl-secret-volume"
+        #   mountPath: /usr/local/share/ca-certificates
+
+    - name: svc-bit
+      resource: 
+        action: create
+        manifest: |
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: nginx
+            labels:
+              run: nginx
+          spec:
+            type: NodePort
+            ports:
+            - port: 80
+              protocol: TCP
+              name: http
+            - port: 443
+              protocol: TCP
+              name: https
+            selector:
+              run: nginx
+
+
+    - name: csr-provisioning
+      container:
+        image: nnanalarhy/cfssl
+        command: [sh, -c]
+        args: [
+         "cd /tmp && 
+         . csr.sh    
+         "
+        ]
+        volumeMounts:
+        - name: csr-config
+          mountPath: /tmp/
+          readOnly: false
+      
+      # outputs:
+      #   artifacts:
+      #   - name: csr
+      #     path: /tmp
+      #     artifactory:
+      #       url: https://thrive.jfrog.io/artifactory/argo-artifacts/csr.gz
+      #       usernameSecret:
+      #         name: artifactory-creds
+      #         key: name
+      #       passwordSecret:
+      #         name: artifactory-creds
+      #         key: pass
+    
+    - name: certificate-provisioning
+      script:
+        image: alpine/k8s:1.13.12
+        command: [sh]
+        source: |
+          cat <<EOF | kubectl apply  -f -
+          apiVersion: certificates.k8s.io/v1beta1
+          kind: CertificateSigningRequest
+          metadata:
+            name: nginx.argo
+          spec:
+            request: $(cat ca.csr | base64 | tr -d '\n')
+            usages:
+            - digital signature
+            - key encipherment
+            - server auth
+          EOF
+
+          kubectl certificate approve nginx.argo
+          kubectl get csr nginx.argo -n tls -o jsonpath='{.status.certificate}' | base64 --decode > server.crt
+          kubectl create secret tls nginxsecret -n argo --key ca-key.pem --cert server.crt
+          kubectl create cm nginxconfigmap --from-file=default.conf -n argo
+
+    - name: deployment-bit
+      resource:
+        action: create
+        manifest: |
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: nginx
+          spec:
+            selector:
+              matchLabels:
+                run: nginx
+            replicas: 1
+            template:
+              metadata:
+                labels:
+                  run: nginx
+              spec:
+                volumes:
+                - name: secret-volume
+                  secret:
+                    secretName: nginxsecret
+                - name: configmap-volume
+                  configMap:
+                    name: nginxconfigmap
+                containers:
+                - name: nginxhttps
+                  image: nginx
+                  ports:
+                  - containerPort: 443
+                  - containerPort: 80
+                  volumeMounts:
+                  - mountPath: /etc/nginx/ssl
+                    name: secret-volume
+                  - mountPath: /etc/nginx/conf.d
+                    name: configmap-volume
+   

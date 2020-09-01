@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+spec:
+  selector:
+    matchLabels:
+      run: nginx
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        run: nginx
+    spec:
+      volumes:
+      - name: secret-volume
+        secret:
+          secretName: nginxsecret
+      - name: configmap-volume
+        configMap:
+          name: nginxconfigmap
+      containers:
+      - name: nginxhttps
+        image: nginx
+        ports:
+        - containerPort: 443
+        - containerPort: 80
+        volumeMounts:
+        - mountPath: /etc/nginx/ssl
+          name: secret-volume
+        - mountPath: /etc/nginx/conf.d
+          name: configmap-volume

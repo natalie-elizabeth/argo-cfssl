@@ -1,0 +1,40 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata: { generateName: build-deploy- }
+spec:
+  entrypoint: build-deploy
+  arguments:
+    parameters:
+    - { name: should-print, value: "true" }
+    - { name: repo, value: "git@github.com:thriveglobal/thrive-cloudflare"}
+    # - { name: url, value: "https://thrive.jfrog.io/artifactory/argo-artifacts/"}
+    
+  volumes:
+  - name: ssl-secret-volume
+    secret: 
+      secretName: nginxsecret
+  - name: csr-config
+    configMap:
+      name: csr-config
+
+  templates:
+    - name: build-deploy
+      steps:
+      - - name: checkout
+          template: checkout
+
+    - name: checkout
+      container:
+        image: alpine:3.12
+        command: 
+      inputs:
+        artifacts:
+        - name: source
+          path: /src
+          git:
+            repo: "{{workflow.parameters.repo}}"
+            sshPrivateKeySecret: { name: github-creds, key: id_rsa}
+      outputs:
+        artifacts:
+        - name: source
+          path: /src
