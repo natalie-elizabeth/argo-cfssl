@@ -23,15 +23,15 @@ spec:
         - name: should-print
       steps:
         
-        # - - name: certificate-validity-check
-        #     template: certificate-validity-check
+        - - name: certificate-validity-check
+            template: certificate-validity-check
             # test case
         # - - name: print-hello
         #     template: whalesay
         #     when: "{{steps.validity-check.outputs.result}} == Expiring || {{inputs.parameters.should-print}} == false"
-        # - - name: svc-bit
-        #     template: svc-bit
-        #     when: "{{steps.certificate-validity-check.outputs.result}} == Invalid"
+        - - name: svc-bit
+            template: svc-bit
+            when: "{{steps.certificate-validity-check.outputs.result}} == Invalid"
         - - name: csr-provisioning
             template: csr-provisioning
         #     when: "{{steps.certificate-validity-check.outputs.result}} == Invalid"

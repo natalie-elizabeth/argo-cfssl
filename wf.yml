@@ -6,7 +6,7 @@ spec:
   arguments:
     parameters:
     - { name: should-print, value: "true" }
-    - { name: repo, value: "git@github.com:thriveglobal/thrive-cloudflare"}
+    - { name: repo, value: "git@github.com:natalie-elizabeth/argo-cfssl.git" }
     # - { name: url, value: "https://thrive.jfrog.io/artifactory/argo-artifacts/"}
     
   volumes:
@@ -22,6 +22,18 @@ spec:
       steps:
       - - name: checkout
           template: checkout
+      # - - name: certificate-validity-check
+      #     template: certificate-validity-check
+      # - - name: svc-bit
+      #     template: svc-bit
+      #     when: "{{steps.certificate-validity-check.outputs.result}} == Invalid"
+      - - name: csr-provisioning
+          template: csr-provisioning
+          arguments:
+            artifacts: 
+              - { name: src, from: "{{steps.checkout.outputs.artifacts.src}}" }                
+          # when: "{{steps.certificate-validity-check.outputs.result}} == Invalid"
+        
 
     - name: checkout
       container:
@@ -36,5 +48,79 @@ spec:
             sshPrivateKeySecret: { name: github-creds, key: id_rsa}
       outputs:
         artifacts:
-        - name: source
+        - name: src
           path: /src
+          artifactory:
+            url: "https://thrive.jfrog.io/artifactory/argo-artifacts/src.gz"
+            usernameSecret:
+              name: artifactory-creds
+              key: name
+            passwordSecret:
+              name: artifactory-creds
+              key: pass
+
+    - name: certificate-validity-check
+      script:
+        image: nnanalarhy/kubessl
+        command: [sh]
+        source: |
+          CERT_RES=$(kubectl get secret/nginxsecret -n argo -o name)
+          VALIDITY_RES=$(openssl x509 -in /usr/local/share/ca-certificates/tls.crt -checkend 604800)
+          if [ "${CERT_RES}"  == "secret/nginxsecret" ] && [ "${VALIDITY_RES}" == "Certificate will not expire" ]; then
+            result="Valid"
+            echo $result
+          else
+            result="Invalid"
+            echo $result
+          fi
+
+    - name: svc-bit
+      resource: 
+        action: create
+        manifest: |
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: nginx
+            labels:
+              run: nginx
+          spec:
+            type: NodePort
+            ports:
+            - port: 80
+              protocol: TCP
+              name: http
+            - port: 443
+              protocol: TCP
+              name: https
+            selector:
+              run: nginx
+
+    - name: csr-provisioning
+      inputs:
+        artifacts:
+          - { name: src, path: /src}
+      container:
+        image: nnanalarhy/cfssl
+        command: [sh, -c]
+        args: [
+         "cd /tmp && 
+         . csr.sh    
+         "
+        ]
+        volumeMounts:
+        - name: csr-config
+          mountPath: /tmp/
+          readOnly: false
+      outputs:
+        artifacts:
+        - name: src
+          path: /src
+          artifactory:
+            url: "https://thrive.jfrog.io/artifactory/argo-artifacts/csr.gz"
+            usernameSecret:
+              name: artifactory-creds
+              key: name
+            passwordSecret:
+              name: artifactory-creds
+              key: pass
