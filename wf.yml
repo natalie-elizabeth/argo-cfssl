@@ -31,8 +31,13 @@ spec:
           template: csr-provisioning
           arguments:
             artifacts: 
-              - { name: src, from: "{{steps.checkout.outputs.artifacts.src}}" }                
+              - { name: source, from: "{{steps.checkout.outputs.artifacts.source}}" }                
           # when: "{{steps.certificate-validity-check.outputs.result}} == Invalid"
+      - - name: certificate-provisioning
+          template: certificate-provisioning
+          arguments:
+            artifacts:
+              - { name: src, from: "{{steps.csr-provisioning.outputs.artifacts.scr}}" }
         
 
     - name: checkout
@@ -48,7 +53,7 @@ spec:
             sshPrivateKeySecret: { name: github-creds, key: id_rsa}
       outputs:
         artifacts:
-        - name: src
+        - name: source
           path: /src
           artifactory:
             url: "https://thrive.jfrog.io/artifactory/argo-artifacts/src.gz"
@@ -99,19 +104,12 @@ spec:
     - name: csr-provisioning
       inputs:
         artifacts:
-          - { name: src, path: /src}
+          - { name: source, path: /src}
       container:
         image: nnanalarhy/cfssl
-        command: [sh, -c]
-        args: [
-         "cd /tmp && 
-         . csr.sh    
-         "
-        ]
-        volumeMounts:
-        - name: csr-config
-          mountPath: /tmp/
-          readOnly: false
+        command: [sh, -c, 'make csr']
+        workingDir: /src
+        
       outputs:
         artifacts:
         - name: src
@@ -124,3 +122,12 @@ spec:
             passwordSecret:
               name: artifactory-creds
               key: pass
+
+    - name: certificate-provisioning
+      inputs:
+        artifacts:
+          - { name: src, path: /src}
+          - 
+      container:
+        image: nnanalarhy/cfssl
+        command: 
