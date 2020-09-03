@@ -19,29 +19,34 @@ spec:
 
   templates:
     - name: build-deploy
-      steps:
-      - - name: checkout
-          template: checkout
-      - - name: svc-bit
-          template: svc-bit
-      - - name: certificate-validity-check
-          template: certificate-validity-check
-      
-      - - name: csr-provisioning
-          template: csr-provisioning
-          arguments:
-            artifacts: 
-              - { name: source, from: "{{steps.checkout.outputs.artifacts.source}}" }                
-          when: "{{steps.certificate-validity-check.outputs.result}} == Invalid"
-      - - name: certificate-provisioning
-          template: certificate-provisioning
-          arguments:
-            artifacts:
-              - { name: src, from: "{{steps.csr-provisioning.outputs.artifacts.src}}" }
-          when: "{{steps.certificate-validity-check.outputs.result}} == Invalid"  
-           
-      - - name: deployment-bit
-          template: deployment-bit
+      dag:
+        tasks:
+
+          - name: checkout
+            template: checkout
+          - name: certificate-validity-check
+            dependencies: [checkout]
+            template: certificate-validity-check
+            
+          - name: svc-bit
+            template: svc-bit
+
+          - name: csr-provisioning
+            dependencies: [certificate-validity-check]
+            template: csr-provisioning
+            arguments:
+              artifacts: 
+              - { name: source, from: "{{tasks.checkout.outputs.artifacts.source}}" }                
+          
+          - name: certificate-provisioning
+            dependencies: [csr-provisioning]
+            template: certificate-provisioning
+            arguments:
+              artifacts:
+              - { name: src, from: "{{tasks.csr-provisioning.outputs.artifacts.src}}" }
+          # # when: "{{steps.certificate-validity-check.outputs.result}} == Invalid"   
+          # - - name: deployment-bit
+          #     template: deployment-bit
         
 
     - name: checkout
